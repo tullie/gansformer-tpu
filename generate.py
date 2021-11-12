@@ -10,16 +10,39 @@ from tqdm import tqdm
 
 from training import misc
 from training.misc import crop_max_rectangle as crop
+import tflex
 
 import dnnlib.tflib as tflib
 from pretrained_networks import load_networks # returns G, D, Gs
 # G: generator, D: discriminator, Gs: generator moving-average (higher quality images)
 
+import tensorflow as tf
+
+# try:
+#   tpu = tf.distribute.cluster_resolver.TPUClusterResolver()  # TPU detection
+#   os.environ["TPU_NAME"] = tpu.cluster_spec().as_dict()['worker'][0]
+#   print('Running on TPU ', os.environ["TPU_NAME"])
+# except ValueError:
+#   raise BaseException('ERROR: Not connected to a TPU runtime; please see the previous cell in this notebook for instructions!')
+
+if 'COLAB_TPU_ADDR' in os.environ:
+  os.environ['TPU_NAME'] = 'grpc://' + os.environ['COLAB_TPU_ADDR']
+
+
 def run(model, gpus, output_dir, images_num, truncation_psi, batch_size, ratio):
-    print("Loading networks...")
-    os.environ["CUDA_VISIBLE_DEVICES"] = gpus                   # Set GPUs
+    print("Initializing...")
+    # os.environ["CUDA_VISIBLE_DEVICES"] = gpus                   # Set GPUs
     tflib.init_tf()                                             # Initialize TensorFlow
+
+    sess = tf.get_default_session()
+    print(sess.list_devices())
+
+    cores = tflex.get_cores()
+    tflex.set_override_cores(cores)
+
+    print("Loading networks...")
     G, D, Gs = load_networks(model)                             # Load pre-trained network
+    print("Printing layers...")
     Gs.print_layers()                                           # Print network details
 
     print("Generate images...")

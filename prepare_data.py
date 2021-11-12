@@ -124,7 +124,7 @@ def get_path(url, dir = None, path = None):
 
 def download_file(url, path, block_sz = 8192):
     if "drive.google.com" in url:
-        gdown.download(url, path)
+        gdown.download(url, path, quiet=False)
     else:
         u = urllib.request.urlopen(url)
         with open(path, "wb") as f:

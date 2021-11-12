@@ -1,9 +1,10 @@
-# Custom TensorFlow ops for efficient resampling of 2D images. Supports:
-# - filter_2d: efficient resampling
-# - upsample_2d: efficient upsampling
-# - downsample_2d: efficient downsampling
-# - upsample_conv_2d: fused convolution and upsampling
-# - conv_downsample_2d: fused convolution and downsampling
+# Copyright (c) 2019, NVIDIA Corporation. All rights reserved.
+#
+# This work is made available under the Nvidia Source Code License-NC.
+# To view a copy of this license, visit
+# https://nvlabs.github.io/stylegan2/license.html
+
+"""Custom TensorFlow ops for efficient resampling of 2D images."""
 
 import os
 import numpy as np
@@ -56,7 +57,7 @@ def upfirdn_2d(x, k, upx=1, upy=1, downx=1, downy=1, padx0=0, padx1=0, pady0=0, 
 
     impl_dict = {
         'ref':  _upfirdn_2d_ref,
-        'cuda': _upfirdn_2d_cuda,
+        'cuda': _upfirdn_2d_ref if 'TPU_NAME' in os.environ or 'NO_NVCC' in os.environ else _upfirdn_2d_cuda,
     }
     return impl_dict[impl](x=x, k=k, upx=upx, upy=upy, downx=downx, downy=downy, padx0=padx0, padx1=padx1, pady0=pady0, pady1=pady1)
 

@@ -11,10 +11,17 @@ import os
 import dnnlib
 from dnnlib import EasyDict
 from metrics.metric_defaults import metric_defaults
+import tensorflow as tf
 from training import misc
+import tensorflow.compat.v1 as tf 
 import pretrained_networks
 # Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+tf.disable_v2_behavior() 
+
+print("Tensorflow version " + tf.__version__)
+
 
 # Conditional set: if property is not None, then assign d[name] := prop
 # for every d in a set of dictionaries
@@ -46,6 +53,8 @@ def set_net(net, reg_interval):
     return ret
 
 def run(**args):
+    # tf.compat.v1.disable_eager_execution()
+
     args      = EasyDict(args)
     train     = EasyDict(run_func_name = "training.training_loop.training_loop") # training loop options
     sched     = EasyDict()                                                       # TrainingSchedule options
@@ -328,8 +337,8 @@ def run(**args):
     kwargs.update(dataset_args = dataset_args, vis_args = vis, sched_args = sched, 
         grid_args = grid, metric_arg_list = metrics, tf_config = tf_config)
     kwargs.submit_config = copy.deepcopy(sc)
-    kwargs.resume = resume
-    kwargs.load_config = args.reload
+    # kwargs.resume = resume
+    # kwargs.load_config = args.reload
 
     dnnlib.submit_run(**kwargs)
 

@@ -1,3 +1,9 @@
+# Copyright (c) 2019, NVIDIA Corporation. All rights reserved.
+#
+# This work is made available under the Nvidia Source Code License-NC.
+# To view a copy of this license, visit
+# https://nvlabs.github.io/stylegan2/license.html
+
 """Custom TensorFlow ops for efficient bias and activation."""
 
 import os
@@ -57,7 +63,7 @@ def fused_bias_act(x, b=None, axis=1, act='linear', alpha=None, gain=None, impl=
 
     impl_dict = {
         'ref':  _fused_bias_act_ref,
-        'cuda': _fused_bias_act_cuda,
+        'cuda': _fused_bias_act_ref if 'TPU_NAME' in os.environ or 'NO_NVCC' in os.environ else _fused_bias_act_cuda,
     }
     return impl_dict[impl](x=x, b=b, axis=axis, act=act, alpha=alpha, gain=gain)
 

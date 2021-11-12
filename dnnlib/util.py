@@ -1,8 +1,10 @@
-﻿# Miscellaneous utility classes and functions:
-### EasyDict to access variables as dict.var instead of dict["var"]
-### Logging and printing to files/screen
-### Modules management
-### File system and URL helpers
+﻿# Copyright (c) 2019, NVIDIA Corporation. All rights reserved.
+#
+# This work is made available under the Nvidia Source Code License-NC.
+# To view a copy of this license, visit
+# https://nvlabs.github.io/stylegan2/license.html
+
+"""Miscellaneous utility classes and functions."""
 
 import ctypes
 import fnmatch
@@ -21,16 +23,19 @@ import html
 import hashlib
 import glob
 import uuid
+import errno
 
 from distutils.util import strtobool
 from typing import Any, List, Tuple, Union
 
+
 # Util classes
 # ------------------------------------------------------------------------------------------
 
-# Allows accessing variables as dict.var instead of dict["var"]
+
 class EasyDict(dict):
-    # Convenience class that behaves like a dict but allows access with the attribute syntax
+    """Convenience class that behaves like a dict but allows access with the attribute syntax."""
+
     def __getattr__(self, name: str) -> Any:
         try:
             return self[name]
@@ -43,13 +48,12 @@ class EasyDict(dict):
     def __delattr__(self, name: str) -> None:
         del self[name]
 
+
 class Logger(object):
-    # Redirect stderr to stdout, optionally print stdout to a file,
-    # and optionally force flushing on both stdout and the file
-    def __init__(self, file_name: str = None, file_mode: str = "a", should_flush: bool = True,
-            screen = True):
+    """Redirect stderr to stdout, optionally print stdout to a file, and optionally force flushing on both stdout and the file."""
+
+    def __init__(self, file_name: str = None, file_mode: str = "w", should_flush: bool = True):
         self.file = None
-        self.screen = screen
 
         if file_name is not None:
             self.file = open(file_name, file_mode)
@@ -68,38 +72,63 @@ class Logger(object):
         self.close()
 
     def write(self, text: str) -> None:
-        # Write text to stdout (and a file) and optionally flush
+        """Write text to stdout (and a file) and optionally flush."""
         if len(text) == 0: # workaround for a bug in VSCode debugger: sys.stdout.write(''); sys.stdout.flush() => crash
             return
 
-        if self.file is not None:
-            self.file.write(text)
-        if self.screen:
-            self.stdout.write(text)
-        if self.should_flush:
-            self.flush()
+        try:
+          if self.file is not None:
+              self.file.write(text)
+
+          self.stdout.write(text)
+
+          if self.should_flush:
+              self.flush()
+        except Exception as e:
+          if e.errno == errno.ENOSPC:
+            pass # fail silently when disk full
+          else:
+            raise
 
     def flush(self) -> None:
-        # Flush written text to both stdout and a file, if open
-        if self.file is not None:
-            self.file.flush()
-        self.stdout.flush()
+        """Flush written text to both stdout and a file, if open."""
+        try:
+          if self.file is not None:
+              self.file.flush()
+
+          self.stdout.flush()
+        except Exception as e:
+          if e.errno == errno.ENOSPC:
+            pass # fail silently when disk full
+          else:
+            raise
 
     def close(self) -> None:
-        # Flush, close possible files, and remove stdout/stderr mirroring
+        """Flush, close possible files, and remove stdout/stderr mirroring."""
         self.flush()
 
-        # if using multiple loggers, prevent closing in wrong order
-        if sys.stdout is self:
-            sys.stdout = self.stdout
-        if sys.stderr is self:
-            sys.stderr = self.stderr
+        try:
+          # if using multiple loggers, prevent closing in wrong order
+          if sys.stdout is self:
+              sys.stdout = self.stdout
+          if sys.stderr is self:
+              sys.stderr = self.stderr
 
-        if self.file is not None:
-            self.file.close()
+          if self.file is not None:
+              self.file.close()
+        except Exception as e:
+          if e.errno == errno.ENOSPC:
+            pass # fail silently when disk full
+          else:
+            raise
+
+
+# Small util functions
+# ------------------------------------------------------------------------------------------
+
 
 def format_time(seconds: Union[int, float]) -> str:
-    # Convert the seconds to human readable string with days, hours, minutes and seconds
+    """Convert the seconds to human readable string with days, hours, minutes and seconds."""
     s = int(np.rint(seconds))
 
     if s < 60:
@@ -111,8 +140,9 @@ def format_time(seconds: Union[int, float]) -> str:
     else:
         return "{0}d {1:02}h {2:02}m".format(s // (24 * 60 * 60), (s // (60 * 60)) % 24, (s // 60) % 60)
 
+
 def ask_yes_no(question: str) -> bool:
-    # Ask the user the question until the user inputs a valid answer
+    """Ask the user the question until the user inputs a valid answer."""
     while True:
         try:
             print("{0} [y/n]".format(question))
@@ -120,12 +150,16 @@ def ask_yes_no(question: str) -> bool:
         except ValueError:
             pass
 
+
 def tuple_product(t: Tuple) -> Any:
-    # Calculate the product of the tuple elements
+    """Calculate the product of the tuple elements."""
     result = 1
+
     for v in t:
         result *= v
+
     return result
+
 
 _str_to_ctype = {
     "uint8": ctypes.c_ubyte,
@@ -140,9 +174,9 @@ _str_to_ctype = {
     "float64": ctypes.c_double
 }
 
+
 def get_dtype_and_ctype(type_obj: Any) -> Tuple[np.dtype, Any]:
-    # Given a type name string (or an object having a __name__ attribute),
-    # return matching Numpy and ctypes types that have the same size in bytes
+    """Given a type name string (or an object having a __name__ attribute), return matching Numpy and ctypes types that have the same size in bytes."""
     type_str = None
 
     if isinstance(type_obj, str):
@@ -160,7 +194,9 @@ def get_dtype_and_ctype(type_obj: Any) -> Tuple[np.dtype, Any]:
     my_ctype = _str_to_ctype[type_str]
 
     assert my_dtype.itemsize == ctypes.sizeof(my_ctype)
+
     return my_dtype, my_ctype
+
 
 def is_pickleable(obj: Any) -> bool:
     try:
@@ -170,11 +206,13 @@ def is_pickleable(obj: Any) -> bool:
     except:
         return False
 
+
 # Functionality to import modules/objects by name, and call functions by name
 # ------------------------------------------------------------------------------------------
+
 def get_module_from_obj_name(obj_name: str) -> Tuple[types.ModuleType, str]:
-    # Searches for the underlying module behind the name to some python object
-    # Returns the module and the object name (original name with module part removed)
+    """Searches for the underlying module behind the name to some python object.
+    Returns the module and the object name (original name with module part removed)."""
 
     # allow convenience shorthands, substitute them by full names
     obj_name = re.sub("^np.", "numpy.", obj_name)
@@ -212,8 +250,9 @@ def get_module_from_obj_name(obj_name: str) -> Tuple[types.ModuleType, str]:
     # we are out of luck, but we have no idea why
     raise ImportError(obj_name)
 
+
 def get_obj_from_module(module: types.ModuleType, obj_name: str) -> Any:
-    # Traverses the object name and returns the last (rightmost) python object
+    """Traverses the object name and returns the last (rightmost) python object."""
     if obj_name == '':
         return module
     obj = module
@@ -221,38 +260,44 @@ def get_obj_from_module(module: types.ModuleType, obj_name: str) -> Any:
         obj = getattr(obj, part)
     return obj
 
+
 def get_obj_by_name(name: str) -> Any:
-    # Finds the python object with the given name
+    """Finds the python object with the given name."""
     module, obj_name = get_module_from_obj_name(name)
     return get_obj_from_module(module, obj_name)
 
+
 def call_func_by_name(*args, func_name: str = None, **kwargs) -> Any:
-    # Finds the python object with the given name and calls it as a function
+    """Finds the python object with the given name and calls it as a function."""
     assert func_name is not None
     func_obj = get_obj_by_name(func_name)
     assert callable(func_obj)
     return func_obj(*args, **kwargs)
 
+
 def get_module_dir_by_obj_name(obj_name: str) -> str:
-    # Get the directory path of the module containing the given object name
+    """Get the directory path of the module containing the given object name."""
     module, _ = get_module_from_obj_name(obj_name)
     return os.path.dirname(inspect.getfile(module))
 
+
 def is_top_level_function(obj: Any) -> bool:
-    # Determine whether the given object is a top-level function, i.e., defined at module scope using 'def'
+    """Determine whether the given object is a top-level function, i.e., defined at module scope using 'def'."""
     return callable(obj) and obj.__name__ in sys.modules[obj.__module__].__dict__
 
+
 def get_top_level_function_name(obj: Any) -> str:
-    # Return the fully-qualified name of a top-level function
+    """Return the fully-qualified name of a top-level function."""
     assert is_top_level_function(obj)
     return obj.__module__ + "." + obj.__name__
+
 
 # File system helpers
 # ------------------------------------------------------------------------------------------
 
 def list_dir_recursively_with_ignore(dir_path: str, ignores: List[str] = None, add_base_to_relative: bool = False) -> List[Tuple[str, str]]:
-    # List all files recursively in a given directory while ignoring given file and directory names
-    # Returns list of tuples containing both absolute and relative paths
+    """List all files recursively in a given directory while ignoring given file and directory names.
+    Returns list of tuples containing both absolute and relative paths."""
     assert os.path.isdir(dir_path)
     base_name = os.path.basename(os.path.normpath(dir_path))
 
@@ -282,9 +327,10 @@ def list_dir_recursively_with_ignore(dir_path: str, ignores: List[str] = None, a
 
     return result
 
+
 def copy_files_and_create_dirs(files: List[Tuple[str, str]]) -> None:
-    # Takes in a list of tuples of (src, dst) paths and copies files
-    # Will create all necessary directories
+    """Takes in a list of tuples of (src, dst) paths and copies files.
+    Will create all necessary directories."""
     for file in files:
         target_dir_name = os.path.dirname(file[1])
 
@@ -294,11 +340,12 @@ def copy_files_and_create_dirs(files: List[Tuple[str, str]]) -> None:
 
         shutil.copyfile(file[0], file[1])
 
+
 # URL helpers
 # ------------------------------------------------------------------------------------------
 
 def is_url(obj: Any, allow_file_urls: bool = False) -> bool:
-    # Determine whether the given object is a valid URL string
+    """Determine whether the given object is a valid URL string."""
     if not isinstance(obj, str) or not "://" in obj:
         return False
     if allow_file_urls and obj.startswith('file:///'):
@@ -314,23 +361,24 @@ def is_url(obj: Any, allow_file_urls: bool = False) -> bool:
         return False
     return True
 
+
 def open_url(url: str, cache_dir: str = None, num_attempts: int = 10, verbose: bool = True) -> Any:
-    # Download the given URL and return a binary-mode file object to access the data
+    """Download the given URL and return a binary-mode file object to access the data."""
     assert is_url(url, allow_file_urls=True)
     assert num_attempts >= 1
 
-    # Handle file URLs
+    # Handle file URLs.
     if url.startswith('file:///'):
         return open(url[len('file:///'):], "rb")
 
-    # Lookup from cache
+    # Lookup from cache.
     url_md5 = hashlib.md5(url.encode("utf-8")).hexdigest()
     if cache_dir is not None:
         cache_files = glob.glob(os.path.join(cache_dir, url_md5 + "_*"))
         if len(cache_files) == 1:
             return open(cache_files[0], "rb")
 
-    # Download
+    # Download.
     url_name = None
     url_data = None
     with requests.Session() as session:
@@ -367,7 +415,7 @@ def open_url(url: str, cache_dir: str = None, num_attempts: int = 10, verbose: b
                 if verbose:
                     print(".", end="", flush=True)
 
-    # Save to cache
+    # Save to cache.
     if cache_dir is not None:
         safe_name = re.sub(r"[^0-9a-zA-Z-._]", "_", url_name)
         cache_file = os.path.join(cache_dir, url_md5 + "_" + safe_name)
@@ -377,5 +425,5 @@ def open_url(url: str, cache_dir: str = None, num_attempts: int = 10, verbose: b
             f.write(url_data)
         os.replace(temp_file, cache_file) # atomic
 
-    # Return data as file object
+    # Return data as file object.
     return io.BytesIO(url_data)
