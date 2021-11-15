@@ -13,10 +13,12 @@ from dnnlib import EasyDict
 from metrics.metric_defaults import metric_defaults
 import tensorflow as tf
 from training import misc
-import tensorflow.compat.v1 as tf 
+# import tensorflow.compat.v1 as tf 
 import pretrained_networks
 # Suppress warnings
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+import tensorflow.compat.v1.io.gfile
 
 tf.disable_v2_behavior() 
 
@@ -119,11 +121,25 @@ def run(**args):
         "allow_soft_placement": True,
         "gpu_options.per_process_gpu_memory_fraction": 1.0
     }
-    if args.gpus != "":
-        num_gpus = len(args.gpus.split(","))
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
-    assert num_gpus in [1, 2, 4, 8]
-    sc.num_gpus = num_gpus
+
+    try:
+      tpu = tf.distribute.cluster_resolver.TPUClusterResolver(tpu="node-2")
+      print(tpu.get_job_name())
+      print(tpu.get_master())
+
+      tf.tpu.experimental.initialize_tpu_system(tpu)
+      # strategy = tf.distribute.TPUStrategy(tpu)
+
+      os.environ["TPU_NAME"] = tpu.cluster_spec().as_dict()['worker'][0]
+      print('Running on TPU ', os.environ["TPU_NAME"])
+    except ValueError:
+      raise BaseException('ERROR: Not connected to a TPU runtime; please see the previous cell in this notebook for instructions!')
+
+    # if args.gpus != "":
+    #     num_gpus = len(args.gpus.split(","))
+    #     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    # assert num_gpus in [1, 2, 4, 8]
+    # sc.num_gpus = num_gpus
 
     # Networks configuration
     cG = set_net("G", reg_interval = 4)
@@ -525,11 +541,12 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.data_dir):
+    if not os.path.exists(args.data_dir) and args.data_dir[:5] != "gs://":
         misc.error("Dataset root directory does not exist")
 
     if not os.path.exists("{}/{}".format(args.data_dir, args.dataset)):
-        misc.error("The dataset {}/{} directory does not exist".format(args.data_dir, args.dataset))
+        if not tf.io.gfile.exists(args.data_dir + args.dataset):
+            misc.error("The dataset {}/{} directory does not exist".format(args.data_dir, args.dataset))
 
     for metric in args.metrics:
         if metric not in metric_defaults:

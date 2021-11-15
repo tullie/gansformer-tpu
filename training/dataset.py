@@ -9,6 +9,9 @@ import dnnlib.tflib as tflib
 from training import misc
 import random
 
+import tensorflow.compat.v1.io.gfile
+
+
 # Dataset class that loads data from tfrecords files
 # It supports labels as optional
 class TFRecordDataset:
@@ -46,13 +49,24 @@ class TFRecordDataset:
         self._cur_lod           = -1
 
         # List tfrecords files and inspect their shapes
-        assert os.path.isdir(self.tfrecord_dir)
-        tfr_files = sorted(glob.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
+        local = os.path.isdir(self.tfrecord_dir) 
+        gcs = tf.compat.v1.io.gfile.exists(self.tfrecord_dir)
+        assert local or gcs
+
+        if local:
+            tfr_files = sorted(glob.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
+        else:
+            tfr_files = sorted(tf.io.gfile.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
         # If max_imgs is not None, take a subset of images out of the 1st file. Otherwise take all files.
         if max_imgs is None:
-            tfr_files = [sorted(glob.glob(re.sub("1of.*", "*", f))) for f in tfr_files]
+            if local:
+                tfr_files = [sorted(glob.glob(re.sub("1of.*", "*", f))) for f in tfr_files]
+            else:
+                tfr_files = [sorted(tf.io.gfile.glob(re.sub("1of.*", "*", f))) for f in tfr_files]
         else:
             tfr_files = [[f] for f in tfr_files]
+
+        print(tfr_files)
 
         assert len(tfr_files) >= 1
         tfr_shapes = []
