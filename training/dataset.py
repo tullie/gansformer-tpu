@@ -8,6 +8,7 @@ import dnnlib
 import dnnlib.tflib as tflib
 from training import misc
 import random
+import tflex
 
 import tensorflow.compat.v1.io.gfile
 
@@ -54,23 +55,23 @@ class TFRecordDataset:
         assert local or gcs
 
         if local:
-            tfr_files = sorted(glob.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
+            self.tfr_files = sorted(glob.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
         else:
-            tfr_files = sorted(tf.io.gfile.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
+            self.tfr_files = sorted(tf.io.gfile.glob(os.path.join(self.tfrecord_dir, "*.tfrecords1of*")))
         # If max_imgs is not None, take a subset of images out of the 1st file. Otherwise take all files.
         if max_imgs is None:
             if local:
-                tfr_files = [sorted(glob.glob(re.sub("1of.*", "*", f))) for f in tfr_files]
+                self.tfr_files = [sorted(glob.glob(re.sub("1of.*", "*", f))) for f in self.tfr_files]
             else:
-                tfr_files = [sorted(tf.io.gfile.glob(re.sub("1of.*", "*", f))) for f in tfr_files]
+                self.tfr_files = [sorted(tf.io.gfile.glob(re.sub("1of.*", "*", f))) for f in self.tfr_files]
         else:
-            tfr_files = [[f] for f in tfr_files]
+            self.tfr_files = [[f] for f in self.tfr_files]
 
-        print(tfr_files)
+        print(self.tfr_files)
 
-        assert len(tfr_files) >= 1
+        assert len(self.tfr_files) >= 1
         tfr_shapes = []
-        for tfr_file in tfr_files:
+        for tfr_file in self.tfr_files:
             tfr_opt = tf.io.TFRecordOptions("")
             for record in tf.python_io.tf_record_iterator(tfr_file[0], tfr_opt):
                 tfr_shapes.append(self.parse_tfrecord_np(record).shape)
@@ -94,7 +95,7 @@ class TFRecordDataset:
             assert resolution <= max_shape[1]
         self.resolution_log2 = int(np.log2(self.resolution))
         file_indexes = [i for i, tfr_shape in enumerate(tfr_shapes) if tfr_shape[1] == self.resolution]
-        tfr_files = [tfr_files[i] for i in file_indexes]
+        self.tfr_files = [self.tfr_files[i] for i in file_indexes]
         tfr_shapes = [tfr_shapes[i] for i in file_indexes]
         self.shape = [max_shape[0], self.resolution, self.resolution]
         tfr_lods = [self.resolution_log2 - int(np.log2(shape[1])) for shape in tfr_shapes]
@@ -120,11 +121,11 @@ class TFRecordDataset:
         self.label_dtype = self._np_labels.dtype.name
 
         # Build TF expressions
-        with tf.name_scope("Dataset"), tf.device("/cpu:0"):
+        with tf.name_scope("Dataset"), tflex.device("/cpu:0"):
             self._tf_minibatch_in = tf.placeholder(tf.int64, name = "minibatch_in", shape = [])
             self._tf_labels_var = tflib.create_var_with_large_initial_value(self._np_labels, name = "labels_var")
             self._tf_labels_dataset = tf.data.Dataset.from_tensor_slices(self._tf_labels_var)
-            for tfr_file, tfr_shape, tfr_lod in zip(tfr_files, tfr_shapes, tfr_lods):
+            for tfr_file, tfr_shape, tfr_lod in zip(self.tfr_files, tfr_shapes, tfr_lods):
                 if tfr_lod < 0:
                     continue
                 # Load dataset

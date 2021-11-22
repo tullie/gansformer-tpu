@@ -201,9 +201,9 @@ def autoimages(summary_name, images, grid_shape=None, res=None):
             grid_shape=grid_shape,
             image_shape=shape[:2],
             num_channels=shape[2])
-    get_tpu_summary().image(summary_name,
-                            images,
-                            reduce_fn=_merge_images_to_grid)
+    # get_tpu_summary().image(summary_name,
+    #                         images,
+    #                         reduce_fn=_merge_images_to_grid)
 
 def autosummary(name: str, value: TfExpressionEx, passthru: TfExpressionEx = None, condition: TfExpressionEx = True) -> TfExpressionEx:
     """Create a new autosummary.

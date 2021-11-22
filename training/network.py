@@ -54,7 +54,7 @@ def get_weight(shape, gain = 1, use_wscale = True, lrmul = 1, weight_var = "weig
 
     # Create variable
     init = tf.initializers.random_normal(0, init_std)
-    return tf.get_variable(weight_var, shape = shape, initializer = init) * runtime_coef
+    return tf.get_variable(weight_var, shape = shape, initializer = init, use_resource=True) * runtime_coef
 
 # Linear dense layer (doesn't include biases. For that see function below)
 def dense_layer(x, dim, gain = 1, use_wscale = True, lrmul = 1, weight_var = "weight", name = None):
@@ -73,7 +73,7 @@ def dense_layer(x, dim, gain = 1, use_wscale = True, lrmul = 1, weight_var = "we
 def apply_bias_act(x, act = "linear", alpha = None, gain = None, lrmul = 1, bias_var = "bias", name = None):
     if name is not None:
         bias_var = "{}_{}".format(bias_var, name)
-    b = tf.get_variable(bias_var, shape = [get_shape(x)[1]], initializer = tf.initializers.zeros()) * lrmul
+    b = tf.get_variable(bias_var, shape = [get_shape(x)[1]], initializer = tf.initializers.zeros(), use_resource=True) * lrmul
     return fused_bias_act(x, b = b, act = act, alpha = alpha, gain = gain)
 
 # Feature normalization
@@ -176,7 +176,7 @@ def get_linear_embeddings(size, dim, num, rng = 1.0):
     theta = tf.range(0, pi, pi / num)
     dirs = tf.stack([tf.cos(theta), tf.sin(theta)], axis = -1)
     embs = tf.get_variable(name = "emb", shape = [num, int(dim / num)],
-        initializer = tf.random_uniform_initializer())
+        initializer = tf.random_uniform_initializer(), use_resource=True)
 
     c = tf.linspace(-rng, rng, size)
     x = tf.tile(tf.expand_dims(c, axis = 0), [size, 1])
@@ -253,11 +253,11 @@ def get_positional_embeddings(max_res, dim, pos_type = "sinus", dir_num = 2, ini
             elif pos_type == "linear":
                 emb = get_linear_embeddings(size, dim, num = dir_num)
             elif pos_type == "trainable2d":
-                emb = tf.get_variable(name = "emb", shape = [size, size, dim], initializer = initializer)
+                emb = tf.get_variable(name = "emb", shape = [size, size, dim], initializer = initializer, use_resource=True)
             else: # pos_type == "trainable"
-                xemb = tf.get_variable(name = "x_emb", shape = [size, int(dim / 2)], initializer = initializer)
+                xemb = tf.get_variable(name = "x_emb", shape = [size, int(dim / 2)], initializer = initializer, use_resource=True)
                 yemb = xemb if shared else tf.get_variable(name = "y_emb", shape = [size, int(dim / 2)],
-                    initializer = initializer)
+                    initializer = initializer, use_resource=True)
                 xemb = tf.tile(tf.expand_dims(xemb, axis = 0), [size, 1, 1])
                 yemb = tf.tile(tf.expand_dims(yemb, axis = 1), [1, size, 1])
                 emb = tf.concat([xemb, yemb], axis = -1)
@@ -268,7 +268,7 @@ def get_positional_embeddings(max_res, dim, pos_type = "sinus", dir_num = 2, ini
 def get_embeddings(size, dim, init = "uniform", name = None):
     initializer = tf.random_uniform_initializer() if init == "uniform" else tf.initializers.random_normal()
     with tf.variable_scope(name):
-        emb = tf.get_variable(name = "emb", shape = [size, dim], initializer = initializer)
+        emb = tf.get_variable(name = "emb", shape = [size, dim], initializer = initializer, use_resource=True)
     return emb
 
 # Produce relative embeddings
@@ -612,7 +612,7 @@ def compute_centroids(_queries, queries, to_from, to_len, from_len, batch_size, 
     if to_from is None or parametric:
         if parametric:
             to_centroids = tf.tile(tf.get_variable("toasgn_init", shape = [1, num_heads, to_len, dim],
-                initializer = tf.initializers.random_normal()), [batch_size, 1, 1, 1])
+                initializer = tf.initializers.random_normal(), use_resource=True), [batch_size, 1, 1, 1])
         else:
             to_centroids = apply_bias_act(dense_layer(queries, dim * num_heads, name = "key2"), name = "key2")
             to_centroids = transpose_for_scores(to_centroids, batch_size, num_heads, dim, dim)
@@ -710,7 +710,7 @@ def transformer_layer(
                     # Compute attention scores based on dot products between
                     # 'from' queries and the 'to' centroids.
                     w = tf.get_variable(name = "st_weights", shape = [num_heads, 1, get_shape(from_elements)[-1]],
-                        initializer = tf.ones_initializer())
+                        initializer = tf.ones_initializer(), use_resource=True)
                     att_scores = tf.matmul(from_elements * w, to_centroids, transpose_b = True)
 
                 # Scale attention scores given head size (see BERT)
@@ -886,7 +886,7 @@ def G_GANformer(
 
     # Setup variables
     dlatent_avg = tf.get_variable("dlatent_avg", shape = [dlatent_size], 
-        initializer = tf.initializers.zeros(), trainable = False)
+        initializer = tf.initializers.zeros(), trainable = False, use_resource=True)
 
     if take_dlatents:
         dlatents = latents_in
@@ -900,7 +900,8 @@ def G_GANformer(
     if dlatent_avg_beta is not None:
         with tf.variable_scope("DlatentAvg"):
             batch_avg = tf.reduce_mean(dlatents[:, :, 0], axis = [0, 1])
-            update_op = tf.assign(dlatent_avg, tflib.lerp(batch_avg, dlatent_avg, dlatent_avg_beta))
+            lerp = tflib.lerp(batch_avg, dlatent_avg, dlatent_avg_beta)
+            update_op = tf.group(tf.assign(dlatent_avg, lerp), name="update")
             with tf.control_dependencies([update_op]):
                 dlatents = tf.identity(dlatents)
 
@@ -1035,7 +1036,7 @@ def G_mapping(
     # Concatenate labels (False by default)
     if label_size:
         with tf.variable_scope("LabelConcat"):
-            w = tf.get_variable("weight", shape = [label_size, latent_size], initializer = tf.initializers.random_normal())
+            w = tf.get_variable("weight", shape = [label_size, latent_size], initializer = tf.initializers.random_normal(), use_resource=True)
             l = tf.tile(tf.expand_dims(tf.matmul(labels_in, w), axis = 1), (1, latents_num, 1))
             x = tf.concat([x, l], axis = 1)
 
@@ -1228,7 +1229,7 @@ def G_synthesis(
 
         # Create new noise variable
         noise_layers.append(tf.get_variable("noise%d" % layer_idx, shape = noise_shape,
-            initializer = tf.initializers.random_normal(), trainable = False))
+            initializer = tf.initializers.random_normal(), trainable = False, use_resource=True))
 
     def add_noise(x, layer_idx):
         if randomize_noise:
@@ -1243,7 +1244,7 @@ def G_synthesis(
                 batch_mul = tf.cast(get_shape(x)[0] / get_shape(noise)[0], tf.int32)
                 noise = tf.tile(noise, (batch_mul, 1, 1, 1))
 
-        strength = tf.get_variable("noise_strength", shape = [], initializer = tf.initializers.zeros())
+        strength = tf.get_variable("noise_strength", shape = [], initializer = tf.initializers.zeros(), use_resource=True)
         x += strength * noise
         return x
 
@@ -1404,7 +1405,7 @@ def G_synthesis(
             with tf.variable_scope("Const"):
                 stem_size = k if merge else 1
                 x = tf.get_variable("const", shape = [stem_size, nf(1), 4, 4],
-                    initializer = tf.initializers.random_normal())
+                    initializer = tf.initializers.random_normal(), use_resource=True)
                 x = tf.tile(x, [batch_size, 1, 1, 1])
 
         # If latent_stem, map the latents to an initial 4x4 image grid
@@ -1637,7 +1638,7 @@ def D_GANformer(
     aggregators = None
     if transformer:
         aggregators = tf.get_variable(name = "aggregators", shape = [components_num, latent_size],
-            initializer = tf.random_uniform_initializer())
+            initializer = tf.random_uniform_initializer(), use_resource=True)
         aggregators = tf.tile(tf.expand_dims(aggregators, axis = 0), [batch_size, 1, 1]) # [batch_size, k, dim]
 
     # Main layers

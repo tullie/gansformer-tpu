@@ -2,11 +2,15 @@
 from warnings import simplefilter
 simplefilter(action = "ignore", category = FutureWarning)
 
+import sys
+# from training import misc
+from training.misc import crop_max_rectangle as crop
 import dnnlib.tflib as tflib
 import argparse
 import copy
 import glob
 import sys
+import tflex
 import os
 
 import dnnlib
@@ -17,12 +21,135 @@ from training import misc
 # import tensorflow.compat.v1 as tf 
 import pretrained_networks
 # Suppress warnings
+
+import argparse
+import os
+import pathlib
+from pathlib import Path
+from pprint import pprint as pp
+
+import numpy as np
+import tensorflow as tf
+import tqdm
+from tqdm import tqdm
+
+import dnnlib
+import tflex
+from dnnlib import EasyDict
+from dnnlib import tflib
+from training import misc
+# from training.networks_stylegan2 import *
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+from io import BytesIO  # for Python 3
 
 tf.disable_v2_behavior() 
 tf.debugging.set_log_device_placement(True)
 
 print("Tensorflow version " + tf.__version__)
+
+
+def rand_latent(n, seed=None, input_shape=None):
+    if seed is not None:
+        if seed < 0:
+            seed = 2*32 - seed
+        np.random.seed(seed)
+    result = np.random.randn(n, *input_shape)
+    if seed is not None:
+        np.random.seed()
+    return result
+
+
+def tfinit():
+    tflib.run(tf.global_variables_initializer())
+
+
+def load_checkpoint(path, checkpoint_num=None, saver=None, sess=None):
+    var_list = tflex.Gs.trainables
+
+    # saver = tf.train.Saver(var_list=var_list)
+    if checkpoint_num is None:
+
+        ckpt = tf.train.latest_checkpoint(path)
+        print(ckpt)
+        if saver is None:
+            saver = tf.train.import_meta_graph(ckpt + ".meta")
+
+        saver.restore(sess, ckpt)
+    else:
+        ckpt = os.path.join(path, f'model.ckpt-{checkpoint_num}')
+
+    assert ckpt is not None
+    print('Loading checkpoint ' + ckpt)
+    saver.restore(tflex.get_session(sess), ckpt)
+    return ckpt
+
+
+def get_checkpoint(path):
+    ckpt = tf.train.latest_checkpoint(path)
+    return ckpt
+
+
+def get_grid_size(n):
+    gw = 1
+    gh = 1
+    i = 0
+    while gw*gh < n:
+        if i % 2 == 0:
+            gw += 1
+        else:
+            gh += 1
+        i += 1
+    return (gw, gh)
+
+
+def gen_images(latents, truncation_psi_val, outfile=None, display=False, labels=None, randomize_noise=False, is_validation=True, network=None, numpy=False, sched=None):
+    if outfile:
+        Path(outfile).parent.mkdir(exist_ok=True, parents=True)
+    
+    if network is None:
+        network = tflex.Gs
+
+    n = latents.shape[0]
+    print(n)
+    print(sched.minibatch_gpu)
+    grid_size = get_grid_size(n)
+    drange_net = [-1, 1]
+    with tflex.device('/gpu:0'):
+        result = network.run(
+            latents,
+            labels,
+            truncation_psi_val=truncation_psi_val,
+            is_validation=is_validation,
+            randomize_noise=randomize_noise,
+            minibatch_size=sched.minibatch_gpu
+        )
+        print(len(result))
+        print(result[0].shape)
+        print(result[1].shape)
+        result = result[0]
+        if result.shape[1] > 3:
+            result = result[:, 3, :, :]
+        else:
+            result = result[:, 0:3, :, :]
+
+        img = misc.to_pil(
+            misc.create_img_grid(result, grid_size),
+            drange_net
+        )
+        img.save(outfile)
+
+    return result if numpy else img
+
+def grab(save_dir, i, n=1, latents=None, input_shape=None, **kwargs):
+    if latents is None:
+        latents = rand_latent(n, seed=i, input_shape=input_shape)
+
+    gw, gh = get_grid_size(latents.shape[0])
+    outfile = str(save_dir / str(i)) + '.png'
+    return gen_images(latents, outfile=outfile, **kwargs)
+
 
 # Conditional set: if property is not None, then assign d[name] := prop
 # for every d in a set of dictionaries
@@ -68,8 +195,8 @@ def run(**args):
         if args[arg] is None:
             args[arg] = True
 
-    if not args.train and not args.eval:
-        misc.log("Warning: Neither --train nor --eval are provided. Therefore, we only print network shapes", "red")
+    # if not args.train and not args.eval:
+    #     misc.log("Warning: Neither --train nor --eval are provided. Therefore, we only print network shapes", "red")
 
     if args.ganformer_default:
         task = args.dataset
@@ -120,33 +247,6 @@ def run(**args):
         "allow_soft_placement": True,
         #"gpu_options.per_process_gpu_memory_fraction": 1.0
     }
-
-    # try:
-    #   tpu = tf.distribute.cluster_resolver.TPUClusterResolver()
-    #   print(tpu.get_job_name())
-    #   print(tpu.get_master())
-    #   tf.config.experimental_connect_to_cluster(tpu)
-    #   tf.tpu.experimental.initialize_tpu_system(tpu)
-    #   # strategy = tf.distribute.TPUStrategy(tpu)
-
-    #   os.environ["TPU_NAME"] = tpu.cluster_spec().as_dict()['worker'][0]
-    #   print('Running on TPU ', os.environ["TPU_NAME"])
-    # except ValueError:
-    #   raise BaseException('ERROR: Not connected to a TPU runtime; please see the previous cell in this notebook for instructions!')
-
-    # tflib.init_tf()                                             # Initialize TensorFlow
-
-    # sess = tf.get_default_session()
-    # print(sess.list_devices())
-
-    # cores = tflex.get_cores()
-    # tflex.set_override_cores(cores)
-
-    # if args.gpus != "":
-    #     num_gpus = len(args.gpus.split(","))
-    #     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
-    # assert num_gpus in [1, 2, 4, 8]
-    # sc.num_gpus = num_gpus
 
     # Networks configuration
     cG = set_net("G", reg_interval = 4)
@@ -313,39 +413,39 @@ def run(**args):
     run_name = "{}-{:03d}".format(args.expname, run_id)
     train.printname = "{} ".format(misc.bold(args.expname))
 
-    snapshot, kimg, resume = None, 0, False
-    pkls = sorted(glob.glob("{}/{}/network*.pkl".format(args.result_dir, run_name)))
+    # snapshot, kimg, resume = None, 0, False
+    # pkls = sorted(glob.glob("{}/{}/network*.pkl".format(args.result_dir, run_name)))
     # Load a particular snapshot is specified
-    if args.pretrained_pkl is not None and args.pretrained_pkl != "None":
-        # Soft links support
-        if args.pretrained_pkl.startswith("gdrive"):
-            if args.pretrained_pkl not in pretrained_networks.gdrive_urls:
-                misc.error("--pretrained_pkl {} not available in the catalog (see pretrained_networks.py)")
+    # if args.pretrained_pkl is not None and args.pretrained_pkl != "None":
+    #     # Soft links support
+    #     if args.pretrained_pkl.startswith("gdrive"):
+    #         if args.pretrained_pkl not in pretrained_networks.gdrive_urls:
+    #             misc.error("--pretrained_pkl {} not available in the catalog (see pretrained_networks.py)")
 
-            snapshot = args.pretrained_pkl
-        else: 
-            snapshot = glob.glob(args.pretrained_pkl)[0]
-            if os.path.islink(snapshot):
-                snapshot = os.readlink(snapshot)
+    #         snapshot = args.pretrained_pkl
+    #     else: 
+    #         snapshot = glob.glob(args.pretrained_pkl)[0]
+    #         if os.path.islink(snapshot):
+    #             snapshot = os.readlink(snapshot)
 
-        # Extract training step from the snapshot if specified
-        try:
-            kimg = int(snapshot.split("-")[-1].split(".")[0])
-        except:
-            pass
+    #     # Extract training step from the snapshot if specified
+    #     try:
+    #         kimg = int(snapshot.split("-")[-1].split(".")[0])
+    #     except:
+    #         pass
 
     # Find latest snapshot in the directory
-    elif len(pkls) > 0:
-        snapshot = pkls[-1]
-        kimg = int(snapshot.split("-")[-1].split(".")[0])
-        resume = True
+    # elif len(pkls) > 0:
+    #     snapshot = pkls[-1]
+    #     kimg = int(snapshot.split("-")[-1].split(".")[0])
+    #     resume = True
 
-    if snapshot:
-        misc.log("Resuming {}, from {}, kimg {}".format(run_name, snapshot, kimg), "white")
-        train.resume_pkl = snapshot
-        train.resume_kimg = kimg
-    else:
-        misc.log("Start model training from scratch", "white")
+    # if snapshot:
+    #     misc.log("Resuming {}, from {}, kimg {}".format(run_name, snapshot, kimg), "white")
+    #     train.resume_pkl = snapshot
+    #     train.resume_kimg = kimg
+    # else:
+    #     misc.log("Start model training from scratch", "white")
 
     # Run environment configuration
     sc.run_dir_root = args.result_dir
@@ -363,7 +463,83 @@ def run(**args):
     # kwargs.resume = resume
     # kwargs.load_config = args.reload
 
-    dnnlib.submit_run(**kwargs)
+    # dnnlib.submit_run(**kwargs)
+    
+    label_size = 0
+    resolution = 512
+    fmap_base = (int(os.environ['FMAP_BASE']) if 'FMAP_BASE' in os.environ else 16) << 10
+    num_channels = 3
+    channel = 3
+    count = 1
+    grid_image_size = int(os.environ['GRID_SIZE']) if 'GRID_SIZE' in os.environ else 9
+    # ------------------------
+    print('------------------')
+    print('Initializing model')
+    print('------------------')
+
+    os.environ['NOISY'] = '1'
+
+    # set up model
+    dnnlib.tflib.init_tf()
+
+    sess = tf.get_default_session()
+    print(sess.list_devices())
+
+    cores = tflex.get_cores()
+    tflex.set_override_cores(cores)
+
+    if 'G' not in globals():
+        with tflex.device('/gpu:0'):
+            tflex.G = tflib.Network(
+                'G', num_channels=num_channels, resolution=resolution, label_size=label_size, **cG.args
+            )
+            tflex.G.print_layers()
+            tflex.Gs, tflex.Gs_finalize = tflex.G.clone2('Gs')
+            tflex.Gs_finalize()
+            tflex.D = tflib.Network(
+                'D', num_channels=num_channels, resolution=resolution, label_size=label_size, **cD.args
+            )
+            tflex.D.print_layers()
+
+    input_shape_1colon = tflex.Gs.input_shape[1:]
+    label_dtype = np.int64
+    grid_size = (2, 2)
+    gw, gh = grid_size
+    gn = np.prod(grid_size)
+    # grid_latents = rand_latent(gn, seed=-1, G=G)
+    grid_labels = np.zeros([gw * gh, label_size], dtype=label_dtype)
+
+    tfinit()
+    print('-----------------')
+    print('Initialized model')
+    print('-----------------')
+    # ----------------------
+    # Load checkpoint
+    print('Loading checkpoint')
+
+    # ------------------------
+    model_ckpt = load_checkpoint(args.model_dir, args.checkpoint_num, sess=sess)
+    model_name = model_ckpt.split('/')[4]
+    model_num = model_ckpt.split('-')[-1]
+    print('Loaded model', model_name)
+
+    tflex.state.noisy = False
+    # ---------------------
+
+    print(tf.get_default_graph().get_all_collection_keys())
+
+    for op in tf.get_default_graph().get_operations(): # tensorflow.python.framework.ops.Operation
+        if op.type == "Placeholder":
+            print(op.name)
+
+    # v = tf.get_collection('variables')
+    # print(v)
+    
+    save_dir = Path(args.save_dir)/model_num
+    # generate samples
+    for i in tqdm(list(range(args.num_samples))):
+        grab(save_dir, i=i, input_shape=input_shape_1colon,
+             truncation_psi_val=args.truncation_psi, sched=sched)  # modify seed
 
 # ----------------------------------------------------------------------------
 
@@ -387,6 +563,16 @@ def main():
 
     # Framework
     # ------------------------------------------------------------------------------------------------------
+    parser.add_argument('--model_dir', type=str, action='store',
+                        help='Location of the checkpoint files')
+    parser.add_argument('--save_dir', type=str, action='store',
+                        help='Location of the directory to save images in')
+    parser.add_argument('--num_samples', type=int, action='store',
+                        help='Number of samples to generate (default: %(default)s)',
+                        default=1)
+    parser.add_argument('--checkpoint_num', type=int, action='store',
+                        help='The checkpoint to use to generate the images. The default is the latest checkpoint in model_dir', default=None)
+
     parser.add_argument("--expname",            help = "Experiment name", default = "exp", type = str)
     parser.add_argument("--eval",               help = "Evaluation mode (default: False)", default = None, action = "store_true")
     parser.add_argument("--train",              help = "Train mode (default: False)", default = None, action = "store_true")
@@ -548,16 +734,16 @@ def main():
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.data_dir) and args.data_dir[:5] != "gs://":
-        misc.error("Dataset root directory does not exist")
+    # if not os.path.exists(args.data_dir) and args.data_dir[:5] != "gs://":
+    #     misc.error("Dataset root directory does not exist")
 
-    if not os.path.exists("{}/{}".format(args.data_dir, args.dataset)):
-        if not tf.io.gfile.exists(args.data_dir + args.dataset):
-            misc.error("The dataset {}/{} directory does not exist".format(args.data_dir, args.dataset))
+    # if not os.path.exists("{}/{}".format(args.data_dir, args.dataset)):
+    #     if not tf.io.gfile.exists(args.data_dir + args.dataset):
+    #         misc.error("The dataset {}/{} directory does not exist".format(args.data_dir, args.dataset))
 
-    for metric in args.metrics:
-        if metric not in metric_defaults:
-            misc.error("Unknown metric: {}".format(metric))
+    # for metric in args.metrics:
+    #     if metric not in metric_defaults:
+    #         misc.error("Unknown metric: {}".format(metric))
 
     run(**vars(args))
 
